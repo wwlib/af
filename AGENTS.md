@@ -91,7 +91,7 @@ aflt memory sync --all --commit --push  # nightly: sync + commit generated + pus
 aflt children --json            # workers of this master, or a summary of masters
 ```
 
-`STATUS` is saved lifecycle (`active` | `paused` | `done`). A process exit does **not** mark the task done — use `aflt done`. `HERDR` is live runtime from `hc ls`: `running` | `shell` | `exited` | `missing` | `unknown` | `-`. `aflt ls --json` also includes derived `workerStatus` (same rules as `aflt children --json`) plus effective `project` and `parent`. `aflt ls` never writes the registry. `aflt timeline` is strictly read-only (no registry/Herdr writes). `aflt dashboard` is also read-only (local UI / snapshot; not `aflt memory dashboard`). Live graph positions persist across SSE updates and settle; **open** counts are live/running only (Herdr-exited/`missing` registry-active sessions are **idle**, not open — registry `status` unchanged). Legacy project `af` aliases to `aflt` for dashboard hubs and memory sync/dashboard folders.
+`STATUS` is saved lifecycle (`active` | `paused` | `done`). A process exit does **not** mark the task done — use `aflt done`. `HERDR` is live runtime from `hc ls`: `running` | `shell` | `exited` | `missing` | `unknown` | `-`. `aflt ls --json` also includes derived `workerStatus` (same rules as `aflt children --json`) plus effective `project` and `parent`. `aflt ls` never writes the registry. `aflt timeline` is strictly read-only (no registry/Herdr writes). `aflt dashboard` is read-only by default (local UI / snapshot; not `aflt memory dashboard`); `--capture-completions` explicitly writes completion notes and receipts. Live graph positions persist across SSE updates and settle; **open** counts are live/running only (Herdr-exited/`missing` registry-active sessions are **idle**, not open — registry `status` unchanged). Legacy project `af` aliases to `aflt` for dashboard hubs and memory sync/dashboard folders.
 
 ### 3. Orchestrate workers from a master
 
@@ -179,9 +179,10 @@ aflt timeline [<project>] [--all] [--json] [--since <date>]
 # AFLT_PROJECT, else cwd project. Chronological roots + indented children; best-effort
 # git commits in each session window. --since ISO or YYYY-MM-DD. Exit 0 when empty.
 
-aflt dashboard --serve [--port 8787] [--host 127.0.0.1] [--json]
-# Live local activity dashboard (read-only). Default bind 127.0.0.1:8787.
+aflt dashboard --serve [--port 8787] [--host 127.0.0.1] [--json] [--capture-completions]
+# Live local activity dashboard (read-only by default). Default bind 127.0.0.1:8787.
 # Blocks until SIGINT/SIGTERM. Not the same as aflt memory dashboard.
+# --capture-completions opts into redacted Task Complete status notes in memory.
 
 aflt dashboard --snapshot <file.svg|html>
 # Standalone SVG or self-contained HTML snapshot of the activity graph (no server).
@@ -215,7 +216,7 @@ aflt memory dashboard [--dry-run] [--json] [--no-redact] [--active-days N]
 # json / redact / active-days semantics as sync.
 
 aflt memory doc [--engine cursor|copilot] [--dry-run] [--json] [--force]
-# Launch a portable Doc Bot `aflt run` session (title memory-doc) in the memory
+# Launch a portable Doc Bot `aflt run` session (title doc-bot) in the memory
 # repo using DOC-AGENT.md as the prompt. Works with Cursor CLI or Copilot CLI.
 # --dry-run does not create a session or start an engine.
 
@@ -228,9 +229,52 @@ aflt sync [--dry-run] [--json]
 
 `aflt timeline` is read-only. Default project: `<project>` arg → `AFLT_PROJECT` → cwd's derived project. Text shows local times (JSON keeps ISO UTC). Commits come from each session's own cwd (`commitsReason`: `not-git` / `missing-cwd`); an open-ended row that is not a live run is bounded at `lastUsed` (`open-ended` when it never ran).
 
-`aflt dashboard` is a separate top-level command from `aflt memory dashboard`. It serves a local read-only activity UI (`--serve`, default `127.0.0.1:8787`) or writes an SVG/HTML snapshot (`--snapshot`). It never mutates the registry, memory repo, or Herdr. The graph keeps node positions across SSE ticks and cools the force layout until it settles (reheat on node add/remove or resize). Stats `open` / `idle` / `done` / `failed` follow display-state (running vs idle), not bare registry `active`.
+`aflt dashboard` is a separate top-level command from `aflt memory dashboard`. It serves a local activity UI (`--serve`, default `127.0.0.1:8787`) or writes an SVG/HTML snapshot (`--snapshot`). Background refreshes never mutate the registry or Herdr; memory writes require `--capture-completions`. Explicitly double-clicking an agent node in the live local UI focuses its uniquely live labeled terminal in the open Herdr app and raises the window. It never resumes or launches agents; errors appear in the sidebar. Snapshots cannot focus Herdr. The graph keeps node positions across SSE ticks and cools the force layout until it settles (reheat on node add/remove or resize). Stats `open` / `idle` / `done` / `failed` follow display-state (running vs idle), not bare registry `active`.
+
+Session activity is separate from lifecycle: green spinning ring = working,
+blue = completed, amber dashed ring / `?` = awaiting input. Herdr `done`
+indicates a completed turn, not an input request. Completion survives a following
+idle signal but clears on new work or a new send; send grace suppresses stale
+completion. Headless workers use live pid / worker state. Spinners respect
+reduced motion. Counts and registry lifecycle are unchanged.
+
+Long session-node labels use the first nine and last six ID characters
+(e.g. `pla-funne...29c501`); the full ID remains in popups and actions. Session popups contain
+only activity state, session ID, engine, saved lifecycle status, and Herdr
+runtime status. Project popups show only the Doc Bot summary. A 450 ms rollout
+grace period lets the pointer enter a popup to select/copy text; hovered popup
+content and position stay stable across live updates. Empty graph clicks and
+Escape immediately dismiss popups, including focused or pending hints.
+
+Native Copilot `session.task_complete` summaries appear in session/project
+details. `aflt dashboard --serve --capture-completions` opts
+into writing each successful event to a dated project `status-notes/` file in
+the configured memory repo. Existing events are backfilled, then new events are
+captured on refresh. `_aflt/task-completions/` holds generated receipts: never
+hand-edit them. They prevent duplicates, including after a note is archived.
+Capture redacts sensitive values, never overwrites human notes, never changes
+registry/Herdr state, and never commits, pushes or automatically runs Doc Bot.
+Failures are visible in the dashboard. Default serving and all snapshots stay
+read-only; do not use `--capture-completions` with `--snapshot`. Messages require
+actual successful native events, not just an idle or completed runtime signal.
+
+`aflt memory doc` creates a `doc-bot` session in project `aflt-memory`.
+It also recognizes legacy `memory-doc` sessions to avoid duplicates; use
+`aflt rename memory-doc doc-bot` to rename an existing session without changing
+its ID or chat history. If both names exist, `doc-bot` takes precedence.
 
 `aflt memory` is opt-in and never auto-syncs. Resolution: `AFLT_MEMORY_REPO` → `config.json` `memoryRepo`. Optional `--commit` / `--push` on `sync` stages root `DASHBOARD.md` and `*/_aflt/**` (human files stay unstaged). Layout: root `DASHBOARD.md` is generated (Active/Dormant; default 14-day ET window via `--active-days` / `memoryActiveDays`; doc-bot summary markers preserved verbatim); `<repo>/<project>/_aflt/` is generated (never hand-edit); `<project>/README.md`, `dashboard.md`, `status-notes/` are human/Doc Bot files that aflt creates only if missing and never commits (never write `DASHBOARD.md` inside a project folder — that name is root-only). Redaction (default on) covers generated files only: home → `~`, private IPs, `*.local`, emails, token-like strings, long hex/base64 (not the preserved doc-bot block). `adhoc` (home/tmp one-offs) is excluded from `--all` unless `--include-adhoc`. Nightly flow on the Mini: `aflt memory sync --all --commit --push` (commits `memory: sync YYYY-MM-DD` only when something changed; exits non-zero if push fails or there is no upstream), then optionally `aflt memory doc` to update the Doc Bot summary in `DASHBOARD.md` (separate commit, only when instructed). `DOC-AGENT.md` in the memory repo is the portable documentarian prompt; `aflt memory init` writes it when missing. `aflt memory doc --engine copilot` is the same role on a work laptop that has Copilot CLI instead of Cursor.
+
+With a configured memory repo, the live dashboard's **Project status & docs**
+selector shows each project's Doc Bot progress/blockers and opens its README,
+project dashboard, and ten latest dated live status notes as read-only Markdown
+(redacted, max 32 KiB per document). The reader renders Markdown locally with a
+source-view toggle; raw HTML is escaped, images are not loaded, and relative
+links can open only included documents. Selecting a graph/session node selects its
+project's context. Changes appear on the existing live refresh; it does not run
+sync or Doc Bot. HTML snapshots embed this reader for offline use; SVG project
+tooltips include the summary and document titles. Memory-only projects are
+included, and document read errors are surfaced without hiding session activity.
 
 ### Headless run and logs
 

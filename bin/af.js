@@ -98,10 +98,13 @@ Usage:
                             best-effort git commits per session cwd (skipped when
                             missing/not-git; projects need no repo). --since ISO or
                             YYYY-MM-DD. Exit 0 when empty.
-  aflt dashboard --serve [--port 8787] [--host 127.0.0.1] [--json]
-                            Live local activity dashboard (read-only). Default bind
+  aflt dashboard --serve [--port 8787] [--host 127.0.0.1] [--json] [--capture-completions]
+                            Live local activity dashboard (read-only by default). Bind
                             127.0.0.1:8787. Blocks until SIGINT/SIGTERM. Separate from
                             aflt memory dashboard (memory-repo DASHBOARD.md).
+                            --capture-completions: save registered Copilot Task Complete
+                            events as project status notes in the configured memory repo.
+                            Backfills existing events; no commits or Doc Bot launch.
   aflt dashboard --snapshot <file.svg|html>
                             Write a standalone SVG or self-contained HTML snapshot
                             of the current activity graph (no server). Parent dirs
@@ -141,7 +144,7 @@ Usage:
                             Same dry-run / json / redact / active-days semantics as sync.
                             Preserves <!-- doc-bot:summary --> block verbatim when present.
   aflt memory doc [--engine cursor|copilot] [--dry-run] [--json] [--force]
-                            Launch a portable Doc Bot session (\`memory-doc\`) in the memory
+                            Launch a portable Doc Bot session (\`doc-bot\`) in the memory
                             repo with DOC-AGENT.md as the prompt (Cursor CLI or Copilot CLI
                             via --engine). Fails if DOC-AGENT.md is missing. --dry-run does
                             not create a session or start an engine.
@@ -1131,12 +1134,13 @@ function cmdTimeline(argv) {
 }
 
 /**
- * Live local activity dashboard (read-only). Separate from `aflt memory dashboard`.
+ * Live local activity dashboard. Background refreshes are read-only by default.
  */
 async function cmdDashboard(argv) {
   const { args, flags } = parseArgs(argv);
   const asJson = recoverBoolFlag(flags, 'json', args);
   const serve = Boolean(flags.serve);
+  const captureCompletions = Boolean(flags['capture-completions']);
   const snapshot =
     flags.snapshot != null && flags.snapshot !== true
       ? String(flags.snapshot)
@@ -1146,7 +1150,7 @@ async function cmdDashboard(argv) {
 
   if (!serve && !snapshot) {
     fail(
-      'usage: aflt dashboard --serve [--port 8787] [--host 127.0.0.1] [--json]\n' +
+      'usage: aflt dashboard --serve [--port 8787] [--host 127.0.0.1] [--json] [--capture-completions]\n' +
         '       aflt dashboard --snapshot <file.svg|html>',
       { json: asJson }
     );
@@ -1154,6 +1158,13 @@ async function cmdDashboard(argv) {
 
   if (serve && snapshot) {
     fail('aflt dashboard: use either --serve or --snapshot, not both', { json: asJson });
+  }
+
+  if (captureCompletions && !serve) {
+    fail('--capture-completions requires --serve; snapshots never write completion notes', { json: asJson });
+  }
+  if (captureCompletions && !memory.resolveMemoryRepo()) {
+    fail('--capture-completions requires a memory repo; run `aflt memory init <path>` first', { json: asJson });
   }
 
   if (snapshot) {
@@ -1190,7 +1201,7 @@ async function cmdDashboard(argv) {
   }
 
   try {
-    await dashboard.serveDashboard({ host, port, json: asJson });
+    await dashboard.serveDashboard({ host, port, json: asJson, captureCompletions });
   } catch (err) {
     fail(err.message || String(err), { json: asJson });
   }
@@ -1504,8 +1515,9 @@ async function cmdMemory(argv) {
       fail(`${memory.DOC_AGENT_REL} is empty: ${docPath}`, { json: asJson });
     }
 
+    const docSession = registry.findExact('doc-bot') || registry.findExact('memory-doc');
     const runArgv = [
-      'memory-doc',
+      docSession ? docSession.id : 'doc-bot',
       '--cwd',
       resolved.path,
       '--project',

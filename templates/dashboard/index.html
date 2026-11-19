@@ -4,19 +4,36 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>aflt live</title>
+  <script>
+    (() => {
+      const param = new URLSearchParams(window.location.search).get("scoutTheme");
+      const theme =
+        param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
   <link rel="stylesheet" href="/dashboard.css"/>
 </head>
 <body>
   <div class="shell">
     <main class="stage" id="stage" aria-label="activity graph">
       <svg id="graph" xmlns="http://www.w3.org/2000/svg"></svg>
-      <div class="hint" id="hint">hover a node · click for details</div>
+      <div id="graph-tooltip" class="graph-tooltip" role="tooltip" hidden></div>
+      <div class="hint" id="hint">
+        <div class="activity-legend" aria-label="Session activity">
+          <span class="working">working</span>
+          <span class="completed">completed</span>
+          <span class="waiting">awaiting input</span>
+        </div>
+        hover a node · click for details · double-click an agent for Herdr
+      </div>
     </main>
     <aside class="panel" id="panel">
       <header class="panel-head">
         <div class="brand">aflt live</div>
         <div class="meta" id="meta">local · connecting…</div>
       </header>
+      <p class="action-status" id="action-status" role="status" aria-live="polite" hidden></p>
       <section class="stats" id="stats"></section>
       <section class="sparks">
         <div class="spark-block">
@@ -31,12 +48,30 @@
       <section class="detail" id="detail">
         <div class="empty">select a project or session</div>
       </section>
+      <section class="memory-panel" aria-label="project status and documentation">
+        <label for="project-select">Project status &amp; docs</label>
+        <select id="project-select"><option value="">Select a project</option></select>
+        <div id="project-memory" aria-live="polite"></div>
+      </section>
       <section class="timeline">
         <div class="label">recent</div>
         <ul id="events"></ul>
       </section>
     </aside>
   </div>
+  <dialog id="document-dialog" aria-labelledby="document-title">
+    <header class="document-header">
+      <h2 id="document-title"></h2>
+      <div class="document-actions">
+        <button id="document-toggle" type="button">View source</button>
+        <button id="document-close" type="button">Close</button>
+      </div>
+    </header>
+    <p id="document-path"></p>
+    <p id="document-notice"></p>
+    <article id="document-content"></article>
+  </dialog>
+  <script src="/marked.min.js"></script>
   <script src="/dashboard.js"></script>
 </body>
 </html>

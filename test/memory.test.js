@@ -1256,7 +1256,7 @@ describe('aflt memory', () => {
       assert.equal(j.ok, true);
       assert.equal(j.dryRun, true);
       assert.equal(j.session.engine, 'copilot');
-      assert.equal(j.session.title, 'memory-doc');
+      assert.equal(j.session.title, 'doc-bot');
       assert.match(String(j.command || ''), /copilot/);
       assert.match(r.stderr, /would create a copilot session/);
       const real = fs.realpathSync(memRepo);
@@ -1286,6 +1286,29 @@ describe('aflt memory', () => {
         }
       }
     });
+
+    for (const title of ['memory-doc', 'doc-bot']) {
+      it(`reuses ${title} without changing the registry, preferring doc-bot when both exist`, () => {
+        assert.equal(af(['memory', 'init', memRepo], env()).status, 0);
+        const legacy = seedSession(home, {
+          title: 'memory-doc', cwd: fs.realpathSync(memRepo), project: 'aflt-memory',
+          engine: 'copilot', status: 'active',
+        });
+        const expected = title === 'memory-doc' ? legacy : seedSession(home, {
+          title: 'doc-bot', cwd: fs.realpathSync(memRepo), project: 'aflt-memory',
+          engine: 'copilot', status: 'active',
+        });
+        const registryPath = path.join(home, 'sessions.json');
+        const before = fs.readFileSync(registryPath, 'utf8');
+        const r = af(['memory', 'doc', '--engine', 'copilot', '--dry-run', '--json'], env());
+        assert.equal(r.status, 0, r.stderr + r.stdout);
+        const plan = JSON.parse(r.stdout);
+        assert.equal(plan.session.id, expected.id);
+        assert.ok(plan.command.includes(expected.chatId), 'resume the existing chat');
+        assert.equal(plan.session.title, title);
+        assert.equal(fs.readFileSync(registryPath, 'utf8'), before);
+      });
+    }
   });
 
 });
